@@ -1,4 +1,3 @@
-cat > admin.php << 'EOF'
 <?php
 require_once 'config.php';
 
@@ -130,4 +129,4 @@ $wallets = $pdo->query("SELECT * FROM wallets ORDER BY id DESC")->fetchAll();
 </div>
 </body>
 </html>
-EOF
+
