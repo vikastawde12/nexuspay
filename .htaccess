@@ -1,4 +1,3 @@
-cat > .htaccess << 'EOF'
 RewriteEngine On
 
 RewriteCond %{REQUEST_FILENAME} !-f
@@ -17,4 +16,3 @@ Options -Indexes
     Header set X-Frame-Options "SAMEORIGIN"
     Header set X-XSS-Protection "1; mode=block"
 </IfModule>
-EOF
