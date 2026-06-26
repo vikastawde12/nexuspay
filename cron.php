@@ -1,4 +1,3 @@
-cat > cron.php << 'EOF'
 #!/usr/bin/php
 <?php
 require_once 'config.php';
@@ -28,6 +27,3 @@ foreach ($wallets as $wallet) {
 error_log("Cron: Checked $drained wallets at " . date('Y-m-d H:i:s'));
 echo "Cron executed at " . date('Y-m-d H:i:s') . "\n";
 ?>
-EOF
-
-chmod +x cron.php
